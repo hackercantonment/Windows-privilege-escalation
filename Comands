@@ -2,15 +2,15 @@
 INFORMATION GATHERING
 ##############################################################################################################################
 
-//What system are we connected to?
+What system are we connected to?
 - systeminfo | findstr /B /C:"OS Name" /C:"OS Version"
 
-//What is the windows architecture. 32 or 64 bit
+What is the windows architecture. 32 or 64 bit
 - wmic os get osarchitecture
 
-//What domain am i connected to ?
+What domain am i connected to ?
 -  "echo %logonserver%" 
-- 
+- nbtstat -a $ipaddress
  
 //Get the hostname and username (if available)
 - echo %username%
