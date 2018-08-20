@@ -2,19 +2,23 @@
 INFORMATION GATHERING
 ##############################################################################################################################
 
-What system are we connected to?
+//What system are we connected to?
 - systeminfo | findstr /B /C:"OS Name" /C:"OS Version"
 
-What is the windows architecture. 32 or 64 bit
+//What is the windows architecture. 32 or 64 bit
 - wmic os get osarchitecture
 
-Get the hostname and username (if available)
+//What domain am i connected to ?
+-  "echo %logonserver%" 
+- 
+ 
+//Get the hostname and username (if available)
 - echo %username%
 
-List other users on the box
+//List other users on the box
 - net users
 
-Networking/Routing Info
+//Networking/Routing Info
 - ipconfig /all
 - route print
 - arp -A
